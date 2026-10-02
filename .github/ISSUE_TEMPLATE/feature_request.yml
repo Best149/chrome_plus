@@ -8,9 +8,9 @@ body:
       label: Verification Steps
       description: Requests that ignore these rules may be closed without further discussion.
       options:
-        - label: I have carefully read the [INI configuration file](https://github.com/Bush2021/chrome_plus/blob/main/src/chrome%2B%2B.ini) and checked whether an existing option already covers my use case.
+        - label: I have carefully read the [INI configuration file](https://github.com/smzhzy26/chrome_plus/blob/main/src/chrome%2B%2B.ini) and checked whether an existing option already covers my use case.
           required: true
-        - label: I searched [GitHub Issues](https://github.com/Bush2021/chrome_plus/issues) and did not find the same request.
+        - label: I searched [GitHub Issues](https://github.com/smzhzy26/chrome_plus/issues) and did not find the same request.
           required: true
         - label: This is not a question, support request, configuration help request, or "how do I do this" post.
           required: true

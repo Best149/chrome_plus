@@ -1,5 +1,5 @@
 # Chrome++ Next
-[![LICENSE](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg?style=for-the-badge&logo=github "LICENSE")](https://github.com/Bush2021/chrome_plus/blob/main/LICENSE) [![LAST COMMIT](https://img.shields.io/github/last-commit/Bush2021/chrome_plus?color=blue&logo=github&style=for-the-badge "LAST COMMIT")](https://github.com/Bush2021/chrome_plus/commits/main) [![STARS](https://img.shields.io/github/stars/Bush2021/chrome_plus?color=brightgreen&logo=github&style=for-the-badge "STARS")](https://github.com/Bush2021/chrome_plus/stargazers) ![SIZES](https://img.shields.io/github/languages/code-size/Bush2021/chrome_plus?color=brightgreen&logo=github&style=for-the-badge "SIZES")
+[![LICENSE](https://img.shields.io/badge/License-GPL--3.0--only-blue.svg?style=for-the-badge&logo=github "LICENSE")](https://github.com/smzhzy26/chrome_plus/blob/main/LICENSE) [![LAST COMMIT](https://img.shields.io/github/last-commit/smzhzy26/chrome_plus?color=blue&logo=github&style=for-the-badge "LAST COMMIT")](https://github.com/smzhzy26/chrome_plus/commits/main) [![STARS](https://img.shields.io/github/stars/smzhzy26/chrome_plus?color=brightgreen&logo=github&style=for-the-badge "STARS")](https://github.com/smzhzy26/chrome_plus/stargazers) ![SIZES](https://img.shields.io/github/languages/code-size/smzhzy26/chrome_plus?color=brightgreen&logo=github&style=for-the-badge "SIZES")
 
 简体中文 | [English](README.md)
 
@@ -17,13 +17,13 @@ Chrome++ Next 是一个 `version.dll` 注入项目，会与 `chrome.exe` 一同�
 - 具体反馈要求以 GitHub Issues 页面和表单为准。
 
 ## 获取
-- [Releases](https://github.com/Bush2021/chrome_plus/releases)
+- [Releases](https://github.com/smzhzy26/chrome_plus/releases)
 
 ## 安装
 - 请确保将 `version.dll` 放在 `chrome.exe` 同一目录。
-- 推荐使用 [Chrome 离线安装包](https://github.com/Bush2021/chrome_installer)，解压两次后直接使用解包得到的 Chrome 程序文件。
+- 推荐使用 [Chrome 离线安装包](https://github.com/smzhzy26/chrome_installer)，解压两次后直接使用解包得到的 Chrome 程序文件。
 - 本项目面向便携式 Chrome 部署场景。如果系统中保留了 updater 组件或其它 Chrome 遗留项，由此产生的环境问题需要自行处理。
-- 如果 `version.dll` 没有被正确加载，可以尝试 [setdll](https://github.com/Bush2021/setdll/)。
+- 如果 `version.dll` 没有被正确加载，可以尝试 [setdll](https://github.com/smzhzy26/setdll/)。
 
 ## 功能概览
 ### 标签页与书签行为
@@ -61,7 +61,7 @@ Chrome++ Next 是一个 `version.dll` 注入项目，会与 `chrome.exe` 一同�
 - 1.6.0 及以后版本使用 [GPL-3.0](LICENSE)。
 
 ## 致谢
-- 所有 [贡献者](https://github.com/Bush2021/chrome_plus/graphs/contributors)
+- 所有 [贡献者](https://github.com/smzhzy26/chrome_plus/graphs/contributors)
 - 原作者 [Shuax](https://github.com/shuax/)
 - 1.5.5 修改代码 [提供者](https://forum.ru-board.com/topic.cgi?forum=5&topic=51073&start=620&limit=1&m=1#1)
 - [面向大海](https://github.com/mxdh/)

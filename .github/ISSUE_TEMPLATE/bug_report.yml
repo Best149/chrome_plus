@@ -8,7 +8,7 @@ body:
       label: Verification Steps
       description: Reports that do not satisfy these requirements may be closed without further discussion.
       options:
-        - label: I have carefully read the [INI configuration file](https://github.com/Bush2021/chrome_plus/blob/main/src/chrome%2B%2B.ini) and understand the relevant options.
+        - label: I have carefully read the [INI configuration file](https://github.com/smzhzy26/chrome_plus/blob/main/src/chrome%2B%2B.ini) and understand the relevant options.
           required: true
         - label: I confirmed the problem happens on the latest stable Google Chrome.
           required: true

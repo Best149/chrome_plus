@@ -195,7 +195,7 @@ bool PatchSettingsHtml(uint8_t* begin, uint32_t size, size_t& new_len) {
   }
 
   const char product_title[] =
-      R"({aboutBrowserVersion}</div><div class="secondary">Powered by <a target="_blank" href="https://github.com/Bush2021/chrome_plus">Chrome++ Next</a> )" RELEASE_VER_STR BUILD_ARCH
+      R"({aboutBrowserVersion}</div><div class="secondary">Powered by <a target="_blank" href="https://github.com/smzhzy26/chrome_plus">Chrome++ Next</a> )" RELEASE_VER_STR BUILD_ARCH
       R"(</div>)";
   ReplaceStringInPlace(html, R"({aboutBrowserVersion}</div>)", product_title);
 

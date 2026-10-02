@@ -2,3 +2,8 @@
 
 *.sh text eol=lf
 *.cmd text eol=crlf
+
+# Vendored third-party sources: keep the exact bytes upstream ships, including
+# their line endings (miniz.c is CRLF, the rest are LF). Without `-text`,
+# `* text=auto` rewrites them to LF on commit.
+mini_gzip/** -text

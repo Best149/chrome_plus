@@ -126,15 +126,29 @@ else()
   target_sources(detours PRIVATE detours/src/disolarm64.cpp)
 endif()
 
+# mini_gzip is vendored source, not a submodule: the repository Chrome++ Next
+# used to track (Bush2021/mini_gzip) no longer exists, which broke every CI
+# build. See mini_gzip/VENDORED.md.
 add_library(mini_gzip STATIC
   mini_gzip/miniz.c
   mini_gzip/mini_gzip.c
+)
+
+# Keep the upstream sources valid C: compile them as C even under a C++ target.
+set_source_files_properties(
+  mini_gzip/miniz.c
+  mini_gzip/mini_gzip.c
+  PROPERTIES LANGUAGE C
 )
 
 target_include_directories(mini_gzip PUBLIC mini_gzip)
 target_compile_options(mini_gzip PRIVATE
   $<$<COMPILE_LANG_AND_ID:C,MSVC>:/wd5287>
   $<$<COMPILE_LANG_AND_ID:C,MSVC>:/wd4267>
+  $<$<COMPILE_LANG_AND_ID:C,MSVC>:/wd4244>
+  $<$<COMPILE_LANG_AND_ID:C,MSVC>:/wd4668>
+  $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-unused-function>
+  $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-unknown-pragmas>
 )
 
 add_library(chrome_plus SHARED
