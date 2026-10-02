@@ -49,14 +49,12 @@ BOOL CALLBACK SearchChromeWindow(HWND hwnd, LPARAM lparam) {
 
 std::vector<DWORD> GetAppPids() {
   std::vector<DWORD> pids;
-  wchar_t current_exe_path[MAX_PATH];
-  GetModuleFileNameW(nullptr, current_exe_path, MAX_PATH);
-  wchar_t* exe_name = wcsrchr(current_exe_path, L'\\');
-  if (exe_name) {
-    ++exe_name;
-  } else {
-    exe_name = current_exe_path;
-  }
+  // `GetAppPath` grows past MAX_PATH: a truncated path would yield a truncated
+  // executable name, and the boss key would then mute the wrong processes.
+  const std::wstring& exe_path = GetAppPath();
+  const size_t separator = exe_path.find_last_of(L'\\');
+  const std::wstring exe_name =
+      separator == std::wstring::npos ? exe_path : exe_path.substr(separator + 1);
 
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
   if (snapshot == INVALID_HANDLE_VALUE) {
@@ -68,7 +66,7 @@ std::vector<DWORD> GetAppPids() {
 
   if (Process32FirstW(snapshot, &pe32)) {
     do {
-      if (_wcsicmp(pe32.szExeFile, exe_name) == 0) {
+      if (_wcsicmp(pe32.szExeFile, exe_name.c_str()) == 0) {
         pids.emplace_back(pe32.th32ProcessID);
       }
     } while (Process32NextW(snapshot, &pe32));
@@ -219,23 +217,33 @@ void OnHotkey(HotkeyAction action) {
 void Hotkey(std::wstring_view keys, HotkeyAction action) {
   if (keys.empty()) {
     return;
-  } else {
-    UINT flag = ParseHotkeys(keys.data());
-
-    std::thread th([flag, action]() {
-      RegisterHotKey(nullptr, 0, LOWORD(flag), HIWORD(flag));
-
-      MSG msg;
-      while (GetMessage(&msg, nullptr, 0, 0)) {
-        if (msg.message == WM_HOTKEY) {
-          OnHotkey(action);
-        }
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-      }
-    });
-    th.detach();
   }
+
+  const UINT flag = ParseHotkeys(keys.data());
+  if (flag == 0) {
+    // An unparsable combination used to be registered as whatever the
+    // recognisable part spelled out, e.g. `Ctrl+Shfit+A` as `Ctrl+A`.
+    DebugLog(L"Hotkey: invalid key '{}'", keys);
+    return;
+  }
+
+  std::thread th([flag, action]() {
+    if (!::RegisterHotKey(nullptr, 0, LOWORD(flag), HIWORD(flag))) {
+      DebugLog(L"Hotkey: RegisterHotKey failed: {}", ::GetLastError());
+      return;
+    }
+
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0)) {
+      if (msg.message == WM_HOTKEY) {
+        OnHotkey(action);
+      }
+      TranslateMessage(&msg);
+      DispatchMessage(&msg);
+    }
+    ::UnregisterHotKey(nullptr, 0);
+  });
+  th.detach();
 }
 
 }  // anonymous namespace

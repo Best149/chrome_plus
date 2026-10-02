@@ -24,12 +24,42 @@
 HMODULE hInstance = nullptr;
 
 // Global constants - use functions to avoid static initialization order issues
+const std::wstring& GetAppPath() {
+  static std::wstring app_path = []() {
+    // `GetModuleFileNameW` truncates silently when the buffer is too small and
+    // only signals it through the return value, so grow until the path fits.
+    // Everything below (the ini path, the portable data/cache directories, the
+    // `%app%` substitution, the AppUserModelID) is derived from this value, and
+    // a truncated path would silently point at the wrong directory.
+    std::vector<wchar_t> buffer(MAX_PATH);
+    for (;;) {
+      const DWORD length = ::GetModuleFileNameW(
+          nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+      if (length == 0) {
+        return std::wstring();
+      }
+      if (length < buffer.size() || buffer.size() >= 0x8000) {
+        // Either it fits, or the API's own 32767-character limit is reached.
+        return std::wstring(buffer.data(), length);
+      }
+      buffer.resize(buffer.size() * 2);
+    }
+  }();
+  return app_path;
+}
+
 const std::wstring& GetAppDir() {
   static std::wstring app_dir = []() {
-    wchar_t path[MAX_PATH];
-    ::GetModuleFileName(nullptr, path, MAX_PATH);
-    ::PathRemoveFileSpec(path);
-    return std::wstring(path);
+    const std::wstring app_path = GetAppPath();
+    if (app_path.empty()) {
+      return app_path;
+    }
+    // `PathRemoveFileSpecW` edits in place and takes no length, so keep it off
+    // a fixed-size buffer.
+    std::vector<wchar_t> buffer(app_path.begin(), app_path.end());
+    buffer.push_back(L'\0');
+    ::PathRemoveFileSpecW(buffer.data());
+    return std::wstring(buffer.data());
   }();
   return app_dir;
 }
@@ -194,16 +224,43 @@ std::wstring GetIniString(std::wstring_view section,
   return std::wstring(buffer.data());
 }
 
+namespace {
+
+// Resolves `path` to a full path, collapsing "." and ".." -- what
+// `PathCanonicalize` did here. `GetFullPathNameW` leaves the buffer undefined
+// when it fails and reports the required size when it truncates, so a fixed
+// `MAX_PATH` buffer could otherwise hand back uninitialized bytes or a
+// silently truncated path for long inputs. The caller keeps its own value when
+// resolution fails.
+std::wstring ResolvePath(const std::wstring& path) {
+  if (path.empty()) {
+    return path;
+  }
+
+  std::vector<wchar_t> buffer(MAX_PATH);
+  for (;;) {
+    const DWORD length = ::GetFullPathNameW(
+        path.c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+    if (length == 0) {
+      DebugLog(L"Path resolution failed for '{}': {}", path, ::GetLastError());
+      return path;
+    }
+    if (length < buffer.size()) {
+      return std::wstring(buffer.data(), length);
+    }
+    // The return value is the required size, including the null terminator.
+    buffer.resize(length);
+  }
+}
+
+}  // namespace
+
 std::wstring CanonicalizePath(const std::wstring& path) {
-  TCHAR temp[MAX_PATH];
-  ::PathCanonicalize(temp, path.data());
-  return std::wstring(temp);
+  return ResolvePath(path);
 }
 
 std::wstring GetAbsolutePath(const std::wstring& path) {
-  wchar_t buffer[MAX_PATH];
-  ::GetFullPathNameW(path.c_str(), MAX_PATH, buffer, nullptr);
-  return buffer;
+  return ResolvePath(path);
 }
 
 std::wstring ExpandEnvironmentPath(const std::wstring& path) {
@@ -245,6 +302,34 @@ void ExecuteCommand(int id, HWND hwnd) {
   ::PostMessageW(hwnd, WM_SYSCOMMAND, id, 0);
 }
 
+namespace {
+
+// Launches `cmd.exe /c <command>` detached. `launch_on_exit` runs from
+// `DllMain(DLL_PROCESS_DETACH)`, where the CRT and the console subsystem may
+// already be torn down: `_wsystem` both depends on them and blocks until the
+// child exits, which holds up teardown. `start` inside the command line runs
+// the real program asynchronously, so nothing here has to wait for it.
+void SpawnDetachedCommand(const std::wstring& command) {
+  std::wstring command_line = L"cmd.exe /c " + command;
+  std::vector<wchar_t> buffer(command_line.begin(), command_line.end());
+  buffer.emplace_back(L'\0');
+
+  STARTUPINFOW startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  if (::CreateProcessW(nullptr, buffer.data(), nullptr, nullptr, FALSE,
+                       CREATE_NO_WINDOW, nullptr, nullptr, &startup_info,
+                       &process_info)) {
+    ::CloseHandle(process_info.hThread);
+    ::CloseHandle(process_info.hProcess);
+    return;
+  }
+  DebugLog(L"LaunchCommands: failed to launch '{}': {}", command,
+           ::GetLastError());
+}
+
+}  // namespace
+
 void LaunchCommands(const std::wstring& get_commands) {
   auto commands = StringSplit(
       get_commands,
@@ -267,7 +352,7 @@ void LaunchCommands(const std::wstring& get_commands) {
     //  error even when all commands run successfully.
     std::wstring cmd =
         LR"(start "chrome++ cmd" cmd /c ")" + expanded_path + LR"(")";
-    _wsystem(cmd.c_str());
+    SpawnDetachedCommand(cmd);
   }
 }
 
@@ -283,6 +368,34 @@ void LaunchCommands(const std::wstring& get_commands) {
                                           static_cast<std::size_t>(length)};
   constexpr std::wstring_view target_prefix = L"Chrome_WidgetWin_";
   return class_name_view.starts_with(target_prefix);
+}
+
+std::optional<std::wstring> GetCommandLineSwitch(std::wstring_view name) {
+  if (name.empty()) {
+    return std::nullopt;
+  }
+
+  int argc = 0;
+  LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
+  if (!argv) {
+    return std::nullopt;
+  }
+
+  std::optional<std::wstring> value;
+  // argv[0] is the executable path.
+  for (int i = 1; i < argc && !value.has_value(); ++i) {
+    const std::wstring_view arg(argv[i]);
+    if (!arg.starts_with(name)) {
+      continue;
+    }
+    if (arg.size() == name.size()) {
+      value = std::wstring();
+    } else if (arg[name.size()] == L'=') {
+      value = std::wstring(arg.substr(name.size() + 1));
+    }
+  }
+  ::LocalFree(argv);
+  return value;
 }
 
 namespace {
@@ -409,9 +522,18 @@ UINT ParseHotkeys(std::wstring_view keys, bool no_repeat) {
       virtual_key = *vk;
       continue;
     }
-    if (auto vk = ParseCharacterKey(key))
+    if (auto vk = ParseCharacterKey(key)) {
       virtual_key = *vk;
+      continue;
+    }
+    // Unknown token. Rejecting the whole combination (0 is never a valid
+    // result: the key code occupies the high word) keeps a typo such as
+    // `Ctrl+Shfit+A` from silently registering `Ctrl+A` instead.
+    return 0;
   }
+
+  if (virtual_key == 0)
+    return 0;
 
   if (no_repeat)
     modifiers |= MOD_NOREPEAT;

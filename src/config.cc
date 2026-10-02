@@ -65,10 +65,21 @@ void Config::LoadConfig() {
 }
 
 void Config::LoadKeyMappings() {
+  // `GetPrivateProfileSectionW` reports nSize-2 when the section does not fit,
+  // so grow until it does: a fixed buffer silently dropped the tail of a long
+  // [keymapping] section.
+  constexpr DWORD kMaxChars = 1 << 20;
   std::vector<wchar_t> buffer(4096);
-  const DWORD chars_read = ::GetPrivateProfileSectionW(
-      L"keymapping", buffer.data(), static_cast<DWORD>(buffer.size()),
-      GetIniPath().c_str());
+  DWORD chars_read = 0;
+  for (;;) {
+    chars_read = ::GetPrivateProfileSectionW(
+        L"keymapping", buffer.data(), static_cast<DWORD>(buffer.size()),
+        GetIniPath().c_str());
+    if (chars_read + 2 < buffer.size() || buffer.size() >= kMaxChars) {
+      break;
+    }
+    buffer.resize(buffer.size() * 2);
+  }
 
   if (chars_read == 0) {
     return;

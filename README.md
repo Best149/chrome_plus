@@ -49,11 +49,31 @@ Chrome++ Next is a `version.dll` injection project for Google Chrome. It is load
 ### Browser environment controls
 - Ignore enterprise policies with `ignore_policies`.
 - Enable the `win32k` fallback only when Chrome++ itself causes startup crashes.
-- Suppress Chrome's false "out of date" upgrade notification on portable installs with `suppress_false_upgrade_notification`.
+- Suppress Chrome's false "out of date" upgrade notification on portable installs with `suppress_false_upgrade_notification`, on by default together with `--disable-features=OutdatedBuildDetector` in `command_line`; this is the recommended setup for a deliberately frozen old Chrome.
 - Additional public options such as `show_password` remain documented in [`src/chrome++.ini`](src/chrome++.ini).
 
 ## Configuration Reference
 - See [`src/chrome++.ini`](src/chrome++.ini) for the full public configuration surface.
+
+## Development Notes
+
+### Keeping the update UI quiet
+`suppress_false_upgrade_notification=1` (the default) makes the installed-version probe read the running version, and `command_line` disables `OutdatedBuildDetector`; together they keep a deliberately frozen portable Chrome from showing "out of date / relaunch to update".
+
+### Verifying the settings-page patch against a Chrome build
+Chrome++ hides the `chrome://settings/help` update row by rewriting that page's HTML inside `resources.pak`, so it depends on the markup a given Chrome ships (the known binding names are listed in [`src/pakpatch.cc`](src/pakpatch.cc)). When moving to a new Chrome version, check it offline instead of guessing:
+
+```powershell
+cmake -S . -B build/tests -DCHROME_PLUS_BUILD_TESTS=ON   # off by default, never part of a release build
+cmake --build build/tests --config MinSizeRel
+ctest --test-dir build/tests -C MinSizeRel
+
+# or directly, against any installed Chrome:
+build/tests/MinSizeRel/chrome_plus_markup_test.exe --extract "<chrome>\resources.pak"
+build/tests/MinSizeRel/chrome_plus_markup_test.exe --file about_page.html
+```
+
+`--file` prints the start tag that carries each binding before and after the patch. If it reports `<none: no tag binds it any more>` the row is hidden and nothing needs changing; otherwise add the name that version uses to the candidate lists in `src/pakpatch.cc` and re-run.
 
 ## License
 - Versions 1.5.4 and earlier are licensed under MIT, with all rights reserved by [Shuax](https://github.com/shuax/).

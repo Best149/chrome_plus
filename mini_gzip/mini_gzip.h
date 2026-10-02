@@ -4,10 +4,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #define MAX_PATH_LEN		1024
 #define	MINI_GZ_MIN(a, b)	((a) < (b) ? (a) : (b))
 
@@ -31,25 +27,36 @@ struct mini_gzip {
 	uint8_t		pad[3];
 };
 
-int mini_gz_start(struct mini_gzip *gz_ptr, const void *mem, size_t mem_len);
-void mini_gz_chunksize_set(struct mini_gzip *gz_ptr, int chunk_size);
-void mini_gz_init(struct mini_gzip *gz_ptr);
-int mini_gz_unpack(struct mini_gzip *gz_ptr, void *mem_out, size_t mem_out_len);
+/* mini_gzip.c */
+extern int	mini_gz_start(struct mini_gzip *gz_ptr, void *mem, size_t mem_len);
+extern void	mini_gz_chunksize_set(struct mini_gzip *gz_ptr, int chunk_size);
+extern void	mini_gz_init(struct mini_gzip *gz_ptr);
+extern int	mini_gz_unpack(struct mini_gzip *gz_ptr, void *mem_out, size_t mem_out_len);
 
-/*
- * Compress a buffer into the GZIP container format. Returns a malloc()ed
- * buffer the caller must free() with free(), or NULL on failure. `out_len`
- * receives the total size of the GZIP stream, including header and footer.
- *
- * Not part of upstream mini_gzip's public API (there it is `static`); it is
- * exposed here because src/pakfile.cc needs it to rebuild a patched pak entry.
- */
-void *gzip_compress(uint8_t *data, size_t len, size_t *out_len);
+#define	func_fprintf	fprintf
+#define	func_fflush	fflush
 
+#define	MINI_GZ_STREAM	stderr
 
+#ifdef MINI_GZ_DEBUG
+#define	GZAS(comp, ...)	do {						\
+	if (!((comp))) {						\
+		func_fprintf(MINI_GZ_STREAM, "Error: ");				\
+		func_fprintf(MINI_GZ_STREAM, __VA_ARGS__);			\
+		func_fprintf(MINI_GZ_STREAM, ", %s:%d\n", __func__, __LINE__);	\
+		func_fflush(MINI_GZ_STREAM);					\
+		exit(1);						\
+	}								\
+} while (0)
 
-#ifdef __cplusplus
-}
+#define	GZDBG(...) do {					\
+	func_fprintf(MINI_GZ_STREAM, "%s:%d ", __func__, __LINE__);	\
+	func_fprintf(MINI_GZ_STREAM, __VA_ARGS__);			\
+	func_fprintf(MINI_GZ_STREAM, "\n");				\
+} while (0)
+#else	/* MINI_GZ_DEBUG */
+#define	GZAS(comp, ...)	
+#define	GZDBG(...)
 #endif
 
 #endif

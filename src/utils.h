@@ -4,6 +4,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -39,6 +40,8 @@ consteval uint32_t GetMagicCode() {
 #define IDC_UPGRADE_DIALOG 40024
 
 // Global constants - use functions to avoid static initialization order issues
+// Full path of this module (`chrome.exe`), grown past MAX_PATH when needed.
+const std::wstring& GetAppPath();
 const std::wstring& GetAppDir();
 const std::wstring& GetIniPath();
 
@@ -117,7 +120,44 @@ void ExecuteCommand(int id, HWND hwnd = 0);
 void LaunchCommands(const std::wstring& get_commands);
 [[nodiscard]] bool IsChromeWindow(HWND hwnd);
 
+// Value of the `--name` switch on this process's own command line, where
+// `name` includes the leading dashes: `std::nullopt` when the switch is
+// absent, an empty string for a bare `--name`, and the text after `=` for
+// `--name=value`. Matching is per argument, so a URL or path that merely
+// contains the same text is not mistaken for a switch.
+std::optional<std::wstring> GetCommandLineSwitch(std::wstring_view name);
+
 // Keyboard and mouse input functions
+// Keys that Windows reports with the extended scan-code prefix. Injecting any
+// other key with KEYEVENTF_EXTENDEDKEY makes it indistinguishable from its
+// keypad twin, e.g. VK_RETURN would arrive as Numpad Enter.
+constexpr bool IsExtendedKey(WORD virtual_key) {
+  switch (virtual_key) {
+    case VK_PRIOR:
+    case VK_NEXT:
+    case VK_END:
+    case VK_HOME:
+    case VK_LEFT:
+    case VK_UP:
+    case VK_RIGHT:
+    case VK_DOWN:
+    case VK_INSERT:
+    case VK_DELETE:
+    case VK_DIVIDE:
+    case VK_NUMLOCK:
+    case VK_RCONTROL:
+    case VK_RMENU:
+    case VK_LWIN:
+    case VK_RWIN:
+    case VK_APPS:
+    case VK_SNAPSHOT:
+    case VK_CANCEL:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // Template function for sending combined key operations - kept in header
 template <typename... T>
 void SendKey(T&&... keys) {
@@ -151,7 +191,8 @@ void SendKey(T&&... keys) {
       default:
         input.type = INPUT_KEYBOARD;
         input.ki.wVk = (WORD)key;
-        input.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
+        input.ki.dwFlags =
+            IsExtendedKey(static_cast<WORD>(key)) ? KEYEVENTF_EXTENDEDKEY : 0;
         input.ki.dwExtraInfo = GetMagicCode();
         break;
     }
@@ -182,9 +223,11 @@ void SendKey(T&&... keys) {
         break;
       default:
         input.type = INPUT_KEYBOARD;
-        input.ki.dwFlags = KEYEVENTF_KEYUP;
         input.ki.wVk = (WORD)key;
-        input.ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP;
+        input.ki.dwFlags = KEYEVENTF_KEYUP;
+        if (IsExtendedKey(static_cast<WORD>(key))) {
+          input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+        }
         input.ki.dwExtraInfo = GetMagicCode();
         break;
     }

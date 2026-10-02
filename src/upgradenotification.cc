@@ -17,6 +17,86 @@ namespace {
 
 static auto RawRegOpenKeyExW = RegOpenKeyExW;
 static auto RawRegQueryValueExW = RegQueryValueExW;
+static auto RawRegCloseKey = RegCloseKey;
+
+// `InstallUtil::GetChromeVersion` opens `...\Google\Update\Clients\{GUID}` and
+// then reads `pv` through the handle it got back. A registry handle carries no
+// queryable path, so a read can only be attributed to the open that produced
+// it: the handles that open returned are remembered here, and only those answer
+// `pv`. Without that, any component reading a value of that short name from any
+// key would be handed the browser version instead.
+//
+// Two kinds of handle end up in the table, because both machines exist:
+//  - the real Clients key handle, when Google Update (or a regular Chrome
+//    install) has registered one -- there the value is exactly the stale
+//    version that produces the false "relaunch to update" prompt;
+//  - a stand-in handle to the requested root, when the key is missing, which is
+//    the portable install this feature was written for.
+//
+// `RegCloseKey` is hooked to drop entries again: the caller closes the handle
+// after reading, and a closed handle value can be recycled for an unrelated
+// key, which would then wrongly answer `pv`.
+constexpr size_t kMaxTrackedKeys = 16;
+HKEY tracked_keys[kMaxTrackedKeys] = {};
+std::mutex tracked_keys_mutex;
+
+void TrackKey(HKEY key) {
+  if (!key) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(tracked_keys_mutex);
+  for (HKEY slot : tracked_keys) {
+    if (slot == key) {
+      return;
+    }
+  }
+  for (HKEY& slot : tracked_keys) {
+    if (!slot) {
+      slot = key;
+      return;
+    }
+  }
+  DebugLog(L"SuppressFalseUpgradeNotification: tracked-key table full");
+}
+
+void UntrackKey(HKEY key) {
+  if (!key) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(tracked_keys_mutex);
+  for (HKEY& slot : tracked_keys) {
+    if (slot == key) {
+      slot = nullptr;
+      return;
+    }
+  }
+}
+
+bool IsTrackedKey(HKEY key) {
+  if (!key) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(tracked_keys_mutex);
+  for (HKEY slot : tracked_keys) {
+    if (slot == key) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A fresh handle to `root`, handed out in place of the missing Clients key. It
+// is deliberately not cached: the caller closes it after reading `pv`, so a
+// cached value would be a closed handle -- and the next probe would fail to
+// read anything, which Chrome treats as an available upgrade.
+HKEY GetStandInKey(HKEY root, REGSAM sam_desired) {
+  HKEY handle = nullptr;
+  if (RawRegOpenKeyExW(root, L"", 0, sam_desired, &handle) != ERROR_SUCCESS) {
+    return nullptr;
+  }
+  TrackKey(handle);
+  return handle;
+}
 
 // Read the running browser version from the loaded `chrome.dll`'s embedded
 // version resource, which is the same `VS_FIXEDFILEINFO` that
@@ -99,7 +179,8 @@ LSTATUS APIENTRY MyRegQueryValueExW(HKEY hKey,
                                     LPDWORD lpType,
                                     LPBYTE lpData,
                                     LPDWORD lpcbData) {
-  if (lpValueName && lstrcmpiW(lpValueName, L"pv") == 0) {
+  if (lpValueName && lstrcmpiW(lpValueName, L"pv") == 0 &&
+      IsTrackedKey(hKey)) {
     const std::wstring version = RunningChromeVersion();
     DebugLog(
         L"SuppressFalseUpgradeNotification: intercepted 'pv' read, "
@@ -140,10 +221,14 @@ LSTATUS APIENTRY MyRegQueryValueExW(HKEY hKey,
 // that key is absent, the open fails, the `pv` read never happens, and Chrome
 // treats the unreadable version as an available upgrade. Hence, the false
 // prompt persists with `MyRegQueryValueExW` never getting a chance to answer.
-// When that specific open fails, hand back a stand-in handle (a duplicate of
-// the requested root) so the `pv` read proceeds and is answered with the
-// running version. Matching with a trailing separator keeps this off the
+// When that specific open reports a missing key, hand back a stand-in (a
+// handle to the requested root) so the `pv` read proceeds and is answered with
+// the running version. Matching with a trailing separator keeps this off the
 // sibling `ClientState` key.
+//
+// A successful open of that path is recorded too: on a machine where the key
+// does exist, reading it through the real handle is what surfaces the stale
+// installed version.
 LSTATUS APIENTRY MyRegOpenKeyExW(HKEY hKey,
                                  LPCWSTR lpSubKey,
                                  DWORD ulOptions,
@@ -151,17 +236,30 @@ LSTATUS APIENTRY MyRegOpenKeyExW(HKEY hKey,
                                  PHKEY phkResult) {
   const LSTATUS result =
       RawRegOpenKeyExW(hKey, lpSubKey, ulOptions, samDesired, phkResult);
-  if (result != ERROR_SUCCESS && phkResult && lpSubKey &&
+  if (phkResult && lpSubKey &&
       StrStrIW(lpSubKey, L"Google\\Update\\Clients\\")) {
-    if (RawRegOpenKeyExW(hKey, L"", 0, samDesired, phkResult) ==
-        ERROR_SUCCESS) {
-      DebugLog(
-          L"SuppressFalseUpgradeNotification: Clients key absent, substituting "
-          L"stand-in handle");
-      return ERROR_SUCCESS;
+    if (result == ERROR_SUCCESS) {
+      TrackKey(*phkResult);
+    } else if (result == ERROR_FILE_NOT_FOUND) {
+      // Only a missing key is substituted: an access or parameter error has to
+      // reach the caller unchanged.
+      if (const HKEY stand_in = GetStandInKey(hKey, samDesired); stand_in) {
+        *phkResult = stand_in;
+        DebugLog(
+            L"SuppressFalseUpgradeNotification: Clients key absent, "
+            L"substituting stand-in handle");
+        return ERROR_SUCCESS;
+      }
     }
   }
   return result;
+}
+
+// Drops the handle again so its value cannot be recycled for an unrelated key
+// while still being treated as a Clients handle.
+LSTATUS APIENTRY MyRegCloseKey(HKEY hKey) {
+  UntrackKey(hKey);
+  return RawRegCloseKey(hKey);
 }
 
 }  // namespace
@@ -177,6 +275,8 @@ void SuppressFalseUpgradeNotification() {
                reinterpret_cast<void*>(MyRegOpenKeyExW));
   DetourAttach(reinterpret_cast<LPVOID*>(&RawRegQueryValueExW),
                reinterpret_cast<void*>(MyRegQueryValueExW));
+  DetourAttach(reinterpret_cast<LPVOID*>(&RawRegCloseKey),
+               reinterpret_cast<void*>(MyRegCloseKey));
   auto status = DetourTransactionCommit();
   if (status != NO_ERROR) {
     DebugLog(L"SuppressFalseUpgradeNotification hooks failed: {}", status);

@@ -49,11 +49,31 @@ Chrome++ Next 是一个 `version.dll` 注入项目，会与 `chrome.exe` 一同�
 ### 浏览器环境控制
 - 通过 `ignore_policies` 忽略企业策略。
 - 仅在 Chrome++ 自身导致启动崩溃时再考虑启用 `win32k` 兜底选项。
-- 通过 `suppress_false_upgrade_notification` 抑制便携版上错误的“已过期”升级提示。
+- 通过 `suppress_false_upgrade_notification` 抑制便携版上错误的“已过期”升级提示，默认开启，并在 `command_line` 中一并关闭 `OutdatedBuildDetector`；这是刻意停留旧版本时的推荐配置。
 - `show_password` 等其它公开选项仍以 [`src/chrome++.ini`](src/chrome++.ini) 为准。
 
 ## 配置说明
 - 完整公开配置请参见 [`src/chrome++.ini`](src/chrome++.ini)。
+
+## 开发说明
+
+### 让更新提示保持安静
+`suppress_false_upgrade_notification=1`（默认）让“已安装版本”的探测读到正在运行的版本，`command_line` 里再关掉 `OutdatedBuildDetector`；两者合起来保证刻意冻结的便携版 Chrome 不再出现“已过期 / 重新启动即可更新”。
+
+### 针对某个 Chrome 版本验证设置页补丁
+Chrome++ 通过改写 `resources.pak` 中设置页的 HTML 来隐藏 `chrome://settings/help` 的更新行，因此它依赖具体 Chrome 版本的标记（已知的绑定名写法列在 [`src/pakpatch.cc`](src/pakpatch.cc)）。换 Chrome 版本时可以离线确认，不必靠猜：
+
+```powershell
+cmake -S . -B build/tests -DCHROME_PLUS_BUILD_TESTS=ON   # 默认关闭，不影响 release 构建
+cmake --build build/tests --config MinSizeRel
+ctest --test-dir build/tests -C MinSizeRel
+
+# 也可以直接对任意已安装的 Chrome 跑：
+build/tests/MinSizeRel/chrome_plus_markup_test.exe --extract "<chrome>\resources.pak"
+build/tests/MinSizeRel/chrome_plus_markup_test.exe --file about_page.html
+```
+
+`--file` 会打印每个绑定名在补丁前后所在的起始标签；若显示 `<none: no tag binds it any more>`，说明该行已被隐藏、无需改动；否则把那个版本实际使用的名字加进 `src/pakpatch.cc` 的候选列表，再跑一次即可。
 
 ## 许可证
 - 1.5.4 及以前版本使用 MIT 许可证，版权所有者为 [Shuax](https://github.com/shuax/)。

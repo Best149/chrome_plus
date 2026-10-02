@@ -118,8 +118,17 @@ class PropertyStoreWrapper final : public IPropertyStore {
   HRESULT STDMETHODCALLTYPE GetValue(REFPROPERTYKEY key,
                                      PROPVARIANT* pv) override {
     if (IsEqualPropertyKey(key, PKEY_AppUserModel_ID)) {
+      if (!pv) {
+        return E_POINTER;
+      }
       auto appid_pv = MakeAppIdVariant();
+      if (!appid_pv || appid_pv->vt != VT_LPWSTR) {
+        // `MakeAppIdVariant` cannot report the failure itself; S_OK with an
+        // empty value would look like an app id that was never set.
+        return E_OUTOFMEMORY;
+      }
       *pv = *appid_pv;
+      // The string now belongs to the caller's PROPVARIANT.
       appid_pv->vt = VT_EMPTY;
       return S_OK;
     }
@@ -129,8 +138,11 @@ class PropertyStoreWrapper final : public IPropertyStore {
   HRESULT STDMETHODCALLTYPE SetValue(REFPROPERTYKEY key,
                                      REFPROPVARIANT propvar) override {
     if (IsEqualPropertyKey(key, PKEY_AppUserModel_ID)) {
-      auto pv = MakeAppIdVariant();
-      return real_store_->SetValue(key, *pv);
+      auto appid_pv = MakeAppIdVariant();
+      if (!appid_pv || appid_pv->vt != VT_LPWSTR) {
+        return E_OUTOFMEMORY;
+      }
+      return real_store_->SetValue(key, *appid_pv);
     }
     return real_store_->SetValue(key, propvar);
   }

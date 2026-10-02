@@ -54,22 +54,32 @@ void ChromePlus() {
 }
 
 void ChromePlusCommand(LPWSTR param) {
-  if (!wcsstr(param, L"--portable")) {
+  // A relaunched portable instance carries the switch appended below. Parsing
+  // the switch instead of searching the raw command line keeps a URL or path
+  // that happens to contain the same text from skipping the relaunch.
+  if (!GetCommandLineSwitch(L"--portable").has_value()) {
+    // Exits inside the call on success. When the relaunch fails the other
+    // features are deliberately left off: this process would otherwise run the
+    // user's default profile without the portable directory overrides the
+    // configuration asked for.
     Portable(param);
-  } else {
-    ChromePlus();
-    LaunchCommands(config.GetLaunchOnStartup());
-    should_run_exit_cmd = true;
+    return;
   }
+
+  ChromePlus();
+  LaunchCommands(config.GetLaunchOnStartup());
+  should_run_exit_cmd = true;
 }
 
 int Loader() {
   // Only main interface.
   LPWSTR param = GetCommandLineW();
   // DebugLog(L"param {}", param);
-  if (!wcsstr(param, L"-type=")) {
+  const std::optional<std::wstring> process_type =
+      GetCommandLineSwitch(L"--type");
+  if (!process_type.has_value()) {
     ChromePlusCommand(param);
-  } else if (wcsstr(param, L"--type=renderer")) {
+  } else if (*process_type == L"renderer") {
     // With in-process WebUI resource loading on (V1, crrev.com/c/5868139,
     // crbug.com/362511750), the browser fills `LocalResourceLoaderConfig`
     // (content/browser/webui/web_ui_impl.cc) and the renderer materializes
@@ -88,19 +98,27 @@ int Loader() {
 }
 
 void InstallLoader() {
+  const HMODULE module = GetModuleHandle(nullptr);
   // Get the address of the original entry point of the main module.
-  MODULEINFO mi;
-  GetModuleInformation(GetCurrentProcess(), GetModuleHandle(nullptr), &mi,
-                       sizeof(MODULEINFO));
+  MODULEINFO mi = {};
+  if (!module || !GetModuleInformation(GetCurrentProcess(), module, &mi,
+                                       sizeof(mi)) ||
+      !mi.EntryPoint) {
+    // Without a valid entry point the trampoline address would be garbage, so
+    // leave the process alone rather than detouring an arbitrary address.
+    DebugLog(L"InstallLoader: entry point lookup failed: {}", GetLastError());
+    return;
+  }
   ExeMain = reinterpret_cast<Startup>(mi.EntryPoint);
 
   DetourTransactionBegin();
   DetourUpdateThread(GetCurrentThread());
-  DetourAttach(reinterpret_cast<LPVOID*>(&ExeMain),
-               reinterpret_cast<void*>(Loader));
-  auto status = DetourTransactionCommit();
-  if (status != NO_ERROR) {
-    DebugLog(L"InstallLoader failed: {}", status);
+  const LONG attach_error = DetourAttach(
+      reinterpret_cast<LPVOID*>(&ExeMain), reinterpret_cast<void*>(Loader));
+  const LONG status = DetourTransactionCommit();
+  if (attach_error != NO_ERROR || status != NO_ERROR) {
+    DebugLog(L"InstallLoader failed: attach={}, commit={}", attach_error,
+             status);
   }
 }
 

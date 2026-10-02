@@ -21,6 +21,10 @@ static auto RawLogonUserW = LogonUserW;
 static auto RawIsOS = IsOS;
 static auto RawNetUserGetInfo = NetUserGetInfo;
 static auto RawGetVolumeInformationW = GetVolumeInformationW;
+// Detours stores the trampoline in the pointer it is handed, so the payload
+// has to outlive the transaction: a stack copy would leave Detours pointing at
+// a returned frame.
+static auto RawGetComputerNameW = GetComputerNameW;
 
 // Enumeration for process creation mitigation policy
 enum ProcessCreationMitigationPolicy : DWORD64 {
@@ -90,6 +94,34 @@ BOOL WINAPI MyUpdateProcThreadAttribute(
                                       lpReturnSize);
 }
 
+// The blobs this file writes are the plaintext itself, so both directions hand
+// the bytes through unchanged. The buffer is `LocalAlloc`ed because that is
+// what the DPAPI contract makes the caller free, and the allocation is checked
+// before it is written to.
+BOOL CopyDataBlobToOutput(_In_ const DATA_BLOB* source,
+                          _Out_ DATA_BLOB* destination) {
+  if (!source || !destination || (source->cbData != 0 && !source->pbData)) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return false;
+  }
+
+  // `LocalAlloc(LMEM_FIXED, 0)` is allowed to return NULL, and a NULL
+  // `pbData` in a "successful" blob is a trap for the caller.
+  const SIZE_T alloc_size = source->cbData ? source->cbData : 1;
+  auto* copy = static_cast<BYTE*>(LocalAlloc(LMEM_FIXED, alloc_size));
+  if (!copy) {
+    SetLastError(ERROR_NOT_ENOUGH_MEMORY);
+    return false;
+  }
+  if (source->cbData != 0) {
+    memcpy(copy, source->pbData, source->cbData);
+  }
+
+  destination->cbData = source->cbData;
+  destination->pbData = copy;
+  return true;
+}
+
 BOOL WINAPI
 MyCryptProtectData(_In_ DATA_BLOB* pDataIn,
                    _In_opt_ LPCWSTR szDataDescr,
@@ -98,11 +130,11 @@ MyCryptProtectData(_In_ DATA_BLOB* pDataIn,
                    _In_opt_ CRYPTPROTECT_PROMPTSTRUCT* pPromptStruct,
                    _In_ DWORD dwFlags,
                    _Out_ DATA_BLOB* pDataOut) {
-  pDataOut->cbData = pDataIn->cbData;
-  pDataOut->pbData =
-      static_cast<BYTE*>(LocalAlloc(LMEM_FIXED, pDataOut->cbData));
-  memcpy(pDataOut->pbData, pDataIn->pbData, pDataOut->cbData);
-  return true;
+  if (!pDataIn || !pDataOut) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return false;
+  }
+  return CopyDataBlobToOutput(pDataIn, pDataOut);
 }
 
 BOOL WINAPI
@@ -113,16 +145,20 @@ MyCryptUnprotectData(_In_ DATA_BLOB* pDataIn,
                      _In_opt_ CRYPTPROTECT_PROMPTSTRUCT* pPromptStruct,
                      _In_ DWORD dwFlags,
                      _Out_ DATA_BLOB* pDataOut) {
+  if (!pDataIn || !pDataOut) {
+    SetLastError(ERROR_INVALID_PARAMETER);
+    return false;
+  }
+
   if (RawCryptUnprotectData(pDataIn, ppszDataDescr, pOptionalEntropy,
                             pvReserved, pPromptStruct, dwFlags, pDataOut)) {
     return true;
   }
 
-  pDataOut->cbData = pDataIn->cbData;
-  pDataOut->pbData =
-      static_cast<BYTE*>(LocalAlloc(LMEM_FIXED, pDataOut->cbData));
-  memcpy(pDataOut->pbData, pDataIn->pbData, pDataOut->cbData);
-  return true;
+  // Not a real DPAPI blob, so it is one of ours (or was written by an earlier
+  // Chrome++ run) and holds the plaintext. Only touch `pDataOut` once the copy
+  // succeeded: a failed `CryptUnprotectData` may have left it partly filled.
+  return CopyDataBlobToOutput(pDataIn, pDataOut);
 }
 
 BOOL WINAPI MyLogonUserW(LPCWSTR lpszUsername,
@@ -163,8 +199,6 @@ NET_API_STATUS WINAPI MyNetUserGetInfo(LPCWSTR servername,
 }  // namespace
 
 void MakeGreen() {
-  auto RawGetComputerNameW = GetComputerNameW;
-
   DetourTransactionBegin();
   DetourUpdateThread(GetCurrentThread());
 

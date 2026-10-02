@@ -88,6 +88,11 @@ option(
   "Use VC-LTL for optimized configurations"
   OFF
 )
+option(
+  CHROME_PLUS_BUILD_TESTS
+  "Build the offline markup tests (never part of the release build)"
+  OFF
+)
 
 add_compile_definitions(
   UNICODE
@@ -218,6 +223,43 @@ set_property(
   TARGET detours mini_gzip chrome_plus
   PROPERTY INTERPROCEDURAL_OPTIMIZATION_MINSIZEREL TRUE
 )
+
+# Offline checks. Each test includes the implementation it exercises (the
+# helpers live in anonymous namespaces), so the corresponding .cc must not be
+# listed as a source here as well.
+if(CHROME_PLUS_BUILD_TESTS)
+  enable_testing()
+
+  # Settings-about-page markup: includes src/pakpatch.cc.
+  add_executable(
+    chrome_plus_markup_test
+    tests/settings_html_patch_test.cc
+    src/pakfile.cc
+    src/utils.cc
+  )
+  target_link_libraries(chrome_plus_markup_test PRIVATE onecore detours mini_gzip)
+  add_test(NAME settings_html_patch COMMAND chrome_plus_markup_test)
+
+  # Portable command line assembly and the path/key/string helpers: includes
+  # src/portable.cc.
+  add_executable(
+    chrome_plus_utils_test
+    tests/utils_and_portable_test.cc
+    src/config.cc
+    src/utils.cc
+  )
+  target_link_libraries(chrome_plus_utils_test PRIVATE onecore)
+  add_test(NAME utils_and_portable COMMAND chrome_plus_utils_test)
+
+  # Pak write-back: gzip_compress must emit a real gzip member and
+  # mini_gz_start must skip the FEXTRA field pakfile.cc pads the slot with.
+  add_executable(
+    chrome_plus_gzip_test
+    tests/mini_gzip_gzip_test.cc
+  )
+  target_link_libraries(chrome_plus_gzip_test PRIVATE mini_gzip)
+  add_test(NAME mini_gzip_gzip COMMAND chrome_plus_gzip_test)
+endif()
 
 if(CHROME_PLUS_USE_VC_LTL)
   include(FetchContent)

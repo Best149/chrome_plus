@@ -52,6 +52,9 @@ void AddModifierInput(std::vector<INPUT>& inputs, WORD vk, bool key_up) {
   input.type = INPUT_KEYBOARD;
   input.ki.wVk = vk;
   input.ki.dwFlags = key_up ? KEYEVENTF_KEYUP : 0;
+  if (IsExtendedKey(vk)) {
+    input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+  }
   input.ki.dwExtraInfo = GetMagicCode();
   inputs.emplace_back(input);
 }
@@ -114,7 +117,9 @@ void SendMappedKey(const KeyMapping& mapping) {
     INPUT input = {};
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(mapping.target_vk);
-    input.ki.dwFlags = KEYEVENTF_EXTENDEDKEY;
+    input.ki.dwFlags = IsExtendedKey(static_cast<WORD>(mapping.target_vk))
+                           ? KEYEVENTF_EXTENDEDKEY
+                           : 0;
     input.ki.dwExtraInfo = GetMagicCode();
     inputs.emplace_back(input);
   }
@@ -122,7 +127,10 @@ void SendMappedKey(const KeyMapping& mapping) {
     INPUT input = {};
     input.type = INPUT_KEYBOARD;
     input.ki.wVk = static_cast<WORD>(mapping.target_vk);
-    input.ki.dwFlags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP;
+    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    if (IsExtendedKey(static_cast<WORD>(mapping.target_vk))) {
+      input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    }
     input.ki.dwExtraInfo = GetMagicCode();
     inputs.emplace_back(input);
   }
@@ -177,8 +185,10 @@ bool TranslateKeyHandler(WPARAM wParam, LPARAM lParam) {
   }
 
   ExecuteCommand(IDC_SHOW_TRANSLATE);
-  keybd_event(VK_RIGHT, 0, 0, 0);
-  keybd_event(VK_RIGHT, 0, KEYEVENTF_KEYUP, 0);
+  // `SendKey` tags the injected key with the magic code so the input hooks can
+  // recognise it as synthetic; `keybd_event` cannot carry that marker, which
+  // would leave the tap indistinguishable from a real Right key press.
+  SendKey(VK_RIGHT);
   return true;
 }
 

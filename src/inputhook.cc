@@ -23,6 +23,20 @@ HHOOK mouse_hook = nullptr;
 
 LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
   if (nCode == HC_ACTION) {
+    // `WH_KEYBOARD` receives only flag bits in `lParam`, not the
+    // `KBDLLHOOKSTRUCT` the low-level hook gets, so the `dwExtraInfo` marker
+    // that `SendKey`/`SendMappedKey` attach cannot be read from the event
+    // itself; the queue's extra info carries that marker instead (same value
+    // `MOUSEHOOKSTRUCT::dwExtraInfo` exposes to `MouseProc`). Without this
+    // check a key mapping whose target is another mapping's source -- or its
+    // own source -- re-enters these handlers and recurses, and `Ctrl+W` sent
+    // by a mapping is re-interpreted by the tab handlers. Clearing the marker
+    // keeps it from outliving the injected event.
+    if (::GetMessageExtraInfo() == static_cast<LPARAM>(GetMagicCode())) {
+      ::SetMessageExtraInfo(0);
+      return CallNextHookEx(keyboard_hook, nCode, wParam, lParam);
+    }
+
     for (const auto& entry : keyboard_handlers) {
       if (entry.handler(wParam, lParam)) {
         return 1;
@@ -78,8 +92,17 @@ bool IsKeyPressed(int vk) {
 }
 
 void InstallInputHooks() {
+  // Both hooks are thread-scoped to Chrome's UI thread, so the module handle
+  // only identifies the DLL that owns the procedures.
   keyboard_hook = SetWindowsHookEx(WH_KEYBOARD, KeyboardProc, hInstance,
                                    GetCurrentThreadId());
+  if (!keyboard_hook) {
+    DebugLog(L"SetWindowsHookEx(WH_KEYBOARD) failed: {}", GetLastError());
+  }
+
   mouse_hook =
       SetWindowsHookEx(WH_MOUSE, MouseProc, hInstance, GetCurrentThreadId());
+  if (!mouse_hook) {
+    DebugLog(L"SetWindowsHookEx(WH_MOUSE) failed: {}", GetLastError());
+  }
 }

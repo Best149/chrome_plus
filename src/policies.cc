@@ -31,8 +31,11 @@ LSTATUS APIENTRY MyRegOpenKeyExW(HKEY hKey,
                                  DWORD ulOptions,
                                  REGSAM samDesired,
                                  PHKEY phkResult) {
-  // It is `HKEY_LOCAL_MACHINE` on my computer, but just in case.
-  if ((hKey == HKEY_LOCAL_MACHINE || hKey == HKEY_CURRENT_USER) &&
+  // It is `HKEY_LOCAL_MACHINE` on my computer, but just in case. `HKEY_USERS`
+  // is covered too: a hive root that is not listed here would still hand the
+  // policy keys out.
+  if ((hKey == HKEY_LOCAL_MACHINE || hKey == HKEY_CURRENT_USER ||
+       hKey == HKEY_USERS) &&
       IsPolicyKey(lpSubKey)) {
     return ERROR_FILE_NOT_FOUND;
   }

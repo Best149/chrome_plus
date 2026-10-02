@@ -251,11 +251,12 @@ std::wstring GetCommand(LPWSTR param) {
 }  // namespace
 
 void Portable(LPWSTR param) {
-  wchar_t path[MAX_PATH];
-  ::GetModuleFileName(nullptr, path, MAX_PATH);
+  // `GetAppPath` grows past MAX_PATH, so an install in a long path still
+  // relaunches instead of silently falling back to a non-portable start.
+  const std::wstring& app_path = GetAppPath();
 
   std::wstring args = GetCommand(param);
-  std::wstring command_line = QuoteSpaceIfNeeded(path);
+  std::wstring command_line = QuoteSpaceIfNeeded(app_path);
   if (!args.empty()) {
     command_line.push_back(L' ');
     command_line.append(args);
@@ -279,8 +280,8 @@ void Portable(LPWSTR param) {
   // https://chromium.googlesource.com/chromium/src/+/HEAD/base/process/launch_win.cc#388
   // https://chromium.googlesource.com/chromium/src/+/HEAD/chrome/app/chrome_exe_main_win.cc#61
   // https://github.com/Bush2021/chrome_plus/issues/252
-  if (::CreateProcessW(path, command_line_buffer.data(), nullptr, nullptr,
-                       FALSE, 0, nullptr, current_directory.c_str(),
+  if (::CreateProcessW(app_path.c_str(), command_line_buffer.data(), nullptr,
+                       nullptr, FALSE, 0, nullptr, current_directory.c_str(),
                        &startup_info, &process_info)) {
     ::CloseHandle(process_info.hThread);
     ::CloseHandle(process_info.hProcess);
