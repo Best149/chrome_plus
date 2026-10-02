@@ -2,3 +2,8 @@
 
 *.sh text eol=lf
 *.cmd text eol=crlf
+
+# Vendored third-party sources: keep the exact bytes upstream ships, including
+# their line endings. Without `-text`, `* text=auto` rewrites them on commit,
+# which silently changes the vendored file.
+mini_gzip/** -text
